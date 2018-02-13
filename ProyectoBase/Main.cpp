@@ -1,58 +1,33 @@
-/*#include <SFML\Network.hpp>
-#include <iostream>
-
-
-int main()
-{
-	std::cout << "¿Seras servidor (s) o cliente (c)? ... ";
-	char c;
-	std::cin >> c;
-	sf::TcpSocket socket;
-	std::string textoAEnviar="";
-	if (c == 's')
-	{
-		sf::TcpListener listener;
-		listener.listen(50000);
-		listener.accept(socket);
-		textoAEnviar = "Mensaje desde servidor\n";
-	}
-	else if (c == 'c')
-	{
-		socket.connect("localhost", 50000, sf::milliseconds(15.f));
-		textoAEnviar = "Mensaje desde cliente\n";
-
-	}
-	else
-	{
-		exit(0);
-	}
-	std::string texto = "Conexion con ... " + (socket.getRemoteAddress()).toString() + ":" + std::to_string(socket.getRemotePort()) + "\n";
-	std::cout << texto;
-
-	socket.send(textoAEnviar.c_str(), texto.length());
-
-	char buffer[100];
-	size_t bytesReceived;
-	socket.receive(buffer, 100, bytesReceived);
-
-	buffer[bytesReceived] = '\0';
-	std::cout << "Mensaje recibido: " << buffer << std::endl;
-
-
-	
-	system("pause");
-	
-	return 0;
-
-}*/
 #include <SFML\Graphics.hpp>
 #include <SFML\Network.hpp>
 #include <string>
+#include <thread>
+#include <mutex>
 #include <iostream>
 #include <vector>
 
 #define MAX_MENSAJES 30
 
+std::mutex mu;
+
+void receive(sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
+	bool open = true;
+	char buffer[100];
+	std::size_t bytesReceived;
+	while (open) {
+		sf::Socket::Status status = socket->receive(&buffer, 100, bytesReceived);
+		if (status == sf::Socket::Status::Disconnected) {
+			open = false;
+		}
+		else if(status==sf::Socket::Status::Done){
+			buffer[bytesReceived] = '\0';
+			mu.lock();
+			aMensajes->push_back(std::string(buffer));
+			mu.unlock();
+		}
+		std::cout << "Entra\n";
+	}
+}
 
 int main()
 {
@@ -127,6 +102,9 @@ int main()
 	separator.setFillColor(sf::Color(200, 200, 200, 255));
 	separator.setPosition(0, 550);
 
+	//thread
+	std::thread t1(&receive,&socket,&aMensajes);
+
 	while (window.isOpen())
 	{
 		sf::Event evento;
@@ -142,13 +120,19 @@ int main()
 					window.close();
 				else if (evento.key.code == sf::Keyboard::Return)
 				{
+					mu.lock();
 					aMensajes.push_back(mensaje);
+					mu.unlock();
+
 					if (aMensajes.size() > 25)
 					{
 						aMensajes.erase(aMensajes.begin(), aMensajes.begin() + 1);
 					}
 					//SEND
-
+					sf::Socket::Status status = socket.send(((std::string)mensaje).c_str(),(int)mensaje.getSize());
+					if (status != sf::Socket::Done) {
+						std::cout << "Error al enviar\n";
+					}
 					mensaje = ">";
 				}
 				break;
@@ -160,8 +144,6 @@ int main()
 				break;
 			}
 		}
-	
-
 
 		window.draw(separator);
 		for (size_t i = 0; i < aMensajes.size(); i++)
@@ -179,5 +161,6 @@ int main()
 		window.display();
 		window.clear();
 	}
-
+	socket.disconnect();
+	t1.join();
 }
