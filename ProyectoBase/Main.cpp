@@ -81,7 +81,30 @@ void receive(sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
 			aMensajes->push_back(std::string(buffer));
 			mu.unlock();
 		}
-		std::cout << "Entra\n";
+	}
+}
+
+void receiveBySelector(sf::SocketSelector* selector,sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
+	bool open = true;
+	char buffer[100];
+	std::size_t bytesReceived;
+	while (open) {
+		//esperamos hasta que haya datos entrantes en alguno de los sockets dentro del selector
+		if (selector->wait()) {
+			//como sabemos que solo hay una conexion no necesitamos mirar el listener ni tener una lista de sockets
+			if (selector->isReady(*socket)) {
+				sf::Socket::Status status = socket->receive(&buffer, 100, bytesReceived);
+				if (status == sf::Socket::Status::Disconnected) {
+					open = false;
+				}
+				else if (status == sf::Socket::Status::Done) {
+					buffer[bytesReceived] = '\0';
+					mu.lock();
+					aMensajes->push_back(std::string(buffer));
+					mu.unlock();
+				}
+			}
+		}
 	}
 }
 
@@ -95,13 +118,14 @@ int main()
 	std::vector<std::string> aMensajes;
 
 	sf::TcpSocket socket;
+	sf::SocketSelector selector;
 	std::cout << "Enter (s) for Server, Enter (c) for Client: ";
 	std::cin >> type;
 	if (type == 's') {
 		//inicializamos server
 		sf::TcpListener listener;
 		//preguntamos por el tipo de conexion
-		std::cout << "Select a type of conexion:\n	- 0: Blocking + Threading\n	-1: NonBlocking\n	- 2: SocketSelector\n";
+		std::cout << "Select a type of conexion:\n	- 0: Blocking + Threading\n	- 1: NonBlocking\n	- 2: SocketSelector\n";
 		int i;
 		std::cin >> i;
 		conType =(conexionType) i;
@@ -114,7 +138,7 @@ int main()
 			std::cout << "Listener no aceptado\n";
 		}
 		else {
-			std::cout << "Listener aceptado\n";
+			std::cout <<  "Listener Ready\n";
 			//aceptamos y comprovamos que este bien
 			if (listener.accept(socket) != sf::Socket::Done) {
 				std::cout << "Accept fallido";
@@ -135,6 +159,12 @@ int main()
 					socket.setBlocking(false);
 					break;
 				case SockSelector:
+					sendNormal(&socket, "2");
+					//añadimos el socket al selector
+					selector.add(socket);
+					//inicializamos el thread
+					t1 = std::thread(&receiveBySelector, &selector, &socket, &aMensajes);
+					
 					break;
 				default:
 					break;
@@ -173,7 +203,11 @@ int main()
 					socket.setBlocking(false);
 					break;
 				case SockSelector:
-					break;
+					std::cout << "Modo Socket Selector\n";
+					//añadimos el socket al selector
+					selector.add(socket);
+					//inicializamos el thread
+					t1 = std::thread(&receiveBySelector, &selector, &socket, &aMensajes);
 				default:
 					break;
 				}
@@ -184,15 +218,13 @@ int main()
 		std::cout << "Not a valid Type\n";
 	}
 
-	
-
 	sf::Vector2i screenDimensions(800, 600);
 
 	sf::RenderWindow window;
 	window.create(sf::VideoMode(screenDimensions.x, screenDimensions.y), "Chat");
 
 	sf::Font font;
-	if (!font.loadFromFile("calibri.ttf"))
+	if (!font.loadFromFile("calibril.ttf"))
 	{
 		std::cout << "Can't load the font file" << std::endl;
 	}
@@ -229,7 +261,6 @@ int main()
 					window.close();
 				else if (evento.key.code == sf::Keyboard::Return)
 				{
-					
 					//SEND
 					switch (conType)
 					{
@@ -240,6 +271,7 @@ int main()
 						sendMessageNoBlock(&socket, mensaje, type);
 						break;
 					case SockSelector:
+						sendMessage(&socket, mensaje, type);
 						break;
 					default:
 						break;
@@ -287,5 +319,6 @@ int main()
 		window.clear();
 	}
 	socket.disconnect();
-	t1.join();
+	if(conType!=conexionType::nonBlock)
+		t1.join();
 }
