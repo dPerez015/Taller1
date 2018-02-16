@@ -9,6 +9,62 @@
 #define MAX_MENSAJES 30
 
 std::mutex mu;
+enum conexionType{blockThread, nonBlock, SockSelector};
+
+void sendNormal(sf::TcpSocket* socket, std::string msj) {
+	sf::Socket::Status status = socket->send(msj.c_str(), msj.length());
+	if (status != sf::Socket::Done) {
+		std::cout << "Error al enviar\n";
+	}
+}
+void sendMessage(sf::TcpSocket* socket, std::string msj, char type) {
+	if (type == 's')
+		msj = "Server:	" + msj;
+	else if(type == 'c')
+		msj = "Client:	" + msj;
+	sf::Socket::Status status = socket->send(msj.c_str(), msj.length());
+	if (status != sf::Socket::Done) {
+		std::cout << "Error al enviar\n";
+	}
+}
+
+void sendMessageNoBlock(sf::TcpSocket* socket, std::string msj, char type) {
+	if (type == 's')
+		msj = "Server:	" + msj;
+	else if (type == 'c')
+		msj = "Client:	" + msj;
+	size_t sent;
+	//primer envio
+	sf::Socket::Status status = socket->send(msj.c_str(), msj.length(), sent);
+	//si el envio es partial reenviamos
+	while (status == sf::Socket::Partial) {
+		size_t newsent;
+		status = socket->send(&msj.c_str()[sent], msj.length()-sent, newsent);
+		sent += newsent;
+	}
+	//comprovamos si ha habido errores
+	if (status != sf::Socket::Done)
+		std::cout << "Error al enviar\n";
+
+}
+
+void receiveNonBlock(sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
+	char data[100];
+	std::size_t bytesReceived;
+
+	sf::Socket::Status statusReceive = socket->receive(data, 100, bytesReceived);
+	if (statusReceive == sf::Socket::NotReady) {
+		return;
+	}
+	else if (statusReceive == sf::Socket::Done) {
+		data[bytesReceived] = '\0';
+		std::string str = data;
+		aMensajes->push_back(str);
+	}
+
+
+}
+
 
 void receive(sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
 	bool open = true;
@@ -34,13 +90,23 @@ int main()
 	//establecimiento de conexion
 	//preguntar si es cliente o servidor (se ha de inicializar el server primero)
 	char type;
+	conexionType conType;
+	std::thread t1;
+	std::vector<std::string> aMensajes;
+
 	sf::TcpSocket socket;
 	std::cout << "Enter (s) for Server, Enter (c) for Client: ";
 	std::cin >> type;
 	if (type == 's') {
 		//inicializamos server
 		sf::TcpListener listener;
-		//escuchamos si nos llega algo del cliente
+		//preguntamos por el tipo de conexion
+		std::cout << "Select a type of conexion:\n	- 0: Blocking + Threading\n	-1: NonBlocking\n	- 2: SocketSelector\n";
+		int i;
+		std::cin >> i;
+		conType =(conexionType) i;
+
+		//escuchamos si el cliente se quiere conectar
 		sf::Socket::Status status=listener.listen(5000);
 
 		//comprovamos que este bien
@@ -49,13 +115,31 @@ int main()
 		}
 		else {
 			std::cout << "Listener aceptado\n";
-		}
-		//aceptamos y comprovamos que este bien
-		if (listener.accept(socket) != sf::Socket::Done) {
-			std::cout << "Accept fallido";
-		}
-		else {
-			std::cout << "Accept done\n";
+			//aceptamos y comprovamos que este bien
+			if (listener.accept(socket) != sf::Socket::Done) {
+				std::cout << "Accept fallido";
+			}
+			else {
+				std::cout << "Accept done\n";
+				//enviamos el tipo de conexion que establecemos
+				switch (conType)
+				{
+				case blockThread:
+					sendNormal(&socket, "0");
+					//inicializamos el thread
+					 t1= std::thread(&receive, &socket, &aMensajes);
+					break;
+				case nonBlock:
+					sendNormal(&socket, "1");
+					//seteamos el socket a nonblocking
+					socket.setBlocking(false);
+					break;
+				case SockSelector:
+					break;
+				default:
+					break;
+				}
+			}
 		}
 		listener.close();
 	}
@@ -67,13 +151,40 @@ int main()
 		}
 		else {
 			std::cout << "Conectado\n";
+			//esperamos a que el server nos diga el tipo de conexion
+			char buffer;
+			std::size_t bytesReceived;
+			sf::Socket::Status status = socket.receive(&buffer, 100, bytesReceived);
+			if (status == sf::Socket::Status::Disconnected) {
+				std::cout << "Problema al establecer conexion\n";
+			}
+			else if (status == sf::Socket::Status::Done) {
+				conType = (conexionType)(buffer - '0');
+				switch (conType)
+				{
+				case blockThread:
+					std::cout << "Modo Blocking\n";
+					//inicializamos el thread
+					t1 = std::thread(&receive, &socket, &aMensajes);
+					break;
+				case nonBlock:
+					std::cout << "Modo NonBlocking\n";
+					//seteamos el socket a non blocking
+					socket.setBlocking(false);
+					break;
+				case SockSelector:
+					break;
+				default:
+					break;
+				}
+			}
 		}
 	}
 	else {
 		std::cout << "Not a valid Type\n";
 	}
 
-	std::vector<std::string> aMensajes;
+	
 
 	sf::Vector2i screenDimensions(800, 600);
 
@@ -81,7 +192,7 @@ int main()
 	window.create(sf::VideoMode(screenDimensions.x, screenDimensions.y), "Chat");
 
 	sf::Font font;
-	if (!font.loadFromFile("calibril.ttf"))
+	if (!font.loadFromFile("calibri.ttf"))
 	{
 		std::cout << "Can't load the font file" << std::endl;
 	}
@@ -101,9 +212,7 @@ int main()
 	sf::RectangleShape separator(sf::Vector2f(800, 5));
 	separator.setFillColor(sf::Color(200, 200, 200, 255));
 	separator.setPosition(0, 550);
-
-	//thread
-	std::thread t1(&receive,&socket,&aMensajes);
+	
 
 	while (window.isOpen())
 	{
@@ -120,6 +229,22 @@ int main()
 					window.close();
 				else if (evento.key.code == sf::Keyboard::Return)
 				{
+					
+					//SEND
+					switch (conType)
+					{
+					case blockThread:
+						sendMessage(&socket, mensaje,type);
+						break;
+					case nonBlock:
+						sendMessageNoBlock(&socket, mensaje, type);
+						break;
+					case SockSelector:
+						break;
+					default:
+						break;
+					}
+
 					mu.lock();
 					aMensajes.push_back(mensaje);
 					mu.unlock();
@@ -128,11 +253,7 @@ int main()
 					{
 						aMensajes.erase(aMensajes.begin(), aMensajes.begin() + 1);
 					}
-					//SEND
-					sf::Socket::Status status = socket.send(((std::string)mensaje).c_str(),(int)mensaje.getSize());
-					if (status != sf::Socket::Done) {
-						std::cout << "Error al enviar\n";
-					}
+					
 					mensaje = ">";
 				}
 				break;
@@ -143,6 +264,10 @@ int main()
 					mensaje.erase(mensaje.getSize() - 1, mensaje.getSize());
 				break;
 			}
+		}
+		//recibir datos
+		if (conType == conexionType::nonBlock) {
+			receiveNonBlock(&socket, &aMensajes);
 		}
 
 		window.draw(separator);
