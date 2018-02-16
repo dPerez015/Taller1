@@ -17,6 +17,8 @@ void sendNormal(sf::TcpSocket* socket, std::string msj) {
 		std::cout << "Error al enviar\n";
 	}
 }
+
+
 void sendMessage(sf::TcpSocket* socket, std::string msj, char type) {
 	if (type == 's')
 		msj = "Server:	" + msj;
@@ -46,6 +48,17 @@ void sendMessageNoBlock(sf::TcpSocket* socket, std::string msj, char type) {
 	if (status != sf::Socket::Done)
 		std::cout << "Error al enviar\n";
 
+}
+void sendExit(sf::TcpSocket* socket, char type, conexionType conType) {
+	std::string msj= "se ha desconectado\n";
+		
+
+	if (conType == conexionType::nonBlock) {
+		sendMessageNoBlock(socket, msj, type);
+	}
+	else {
+		sendMessage(socket, msj, type);
+	}
 }
 
 void receiveNonBlock(sf::TcpSocket* socket, std::vector<std::string>* aMensajes) {
@@ -261,32 +274,38 @@ int main()
 					window.close();
 				else if (evento.key.code == sf::Keyboard::Return)
 				{
-					//SEND
-					switch (conType)
-					{
-					case blockThread:
-						sendMessage(&socket, mensaje,type);
-						break;
-					case nonBlock:
-						sendMessageNoBlock(&socket, mensaje, type);
-						break;
-					case SockSelector:
-						sendMessage(&socket, mensaje, type);
-						break;
-					default:
-						break;
+					if (mensaje == ">exit") {
+						window.close();
+						sendExit(&socket, type, conType);
 					}
-
-					mu.lock();
-					aMensajes.push_back(mensaje);
-					mu.unlock();
-
-					if (aMensajes.size() > 25)
-					{
-						aMensajes.erase(aMensajes.begin(), aMensajes.begin() + 1);
-					}
+					else{
+						//SEND
+						switch (conType)
+						{
+						case blockThread:
+							sendMessage(&socket, mensaje,type);
+							break;
+						case nonBlock:
+							sendMessageNoBlock(&socket, mensaje, type);
+							break;
+						case SockSelector:
+							sendMessage(&socket, mensaje, type);
+							break;
+						default:
+							break;
+						}
 					
-					mensaje = ">";
+						mu.lock();
+						aMensajes.push_back(mensaje);
+						mu.unlock();
+
+						if (aMensajes.size() > 25)
+						{
+							aMensajes.erase(aMensajes.begin(), aMensajes.begin() + 1);
+						}
+
+						mensaje = ">";
+					}
 				}
 				break;
 			case sf::Event::TextEntered:
